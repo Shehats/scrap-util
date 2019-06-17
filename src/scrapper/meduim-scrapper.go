@@ -1,19 +1,27 @@
 package scrapper
 
 import (
-	"fmt"
 	"log"
 	"net/http"
 	"regexp"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/Workiva/go-datastructures/set"
 )
 
-// Relevence is a storege of useful users and tags from the scrapper
+const TitleClass = "graf graf--h3 graf-after--figure graf--trailing graf--title"
+
+type Publication struct {
+	Title    string
+	Category string
+	Uri      string
+	Body     string
+}
+
+// Relevence is a storege of useful publications
 type Relevence struct {
-	users          []string
-	publicationIds []string
+	Publications map[string]Publication
 }
 
 // MediumScrapper is an implementation of WebScrapper
@@ -21,10 +29,19 @@ type MediumScrapper struct {
 	uri string
 }
 
+func NewMediumScrapper(uri string) *MediumScrapper {
+	scrapper := new(MediumScrapper)
+	scrapper.uri = uri
+	return scrapper
+}
+
 // Get is the implementation fo MediumScrapper
-// Returns tags and users
 func (scrapper *MediumScrapper) Get(tags ...string) Relevence {
-	uri := ""
+	uri := scrapper.uri
+
+	soFar := set.New()
+	visited := set.New()
+
 	for _, tag := range tags {
 		uri = uri + tag
 	}
@@ -35,25 +52,77 @@ func (scrapper *MediumScrapper) Get(tags ...string) Relevence {
 		log.Fatal(err)
 	}
 
-	users := make([]string, 0)
-
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
 
 	if err != nil {
 		log.Fatal("Error Loading HTTP response body. ", err)
 	}
 
+	var publications map[string]Publication
+
+	publications = make(map[string]Publication)
+
+	doc.Find("h3").Each(func(index int, element *goquery.Selection) {
+		if element.HasClass(TitleClass) {
+			slug := slugify(element.Text())
+			publications[slug] = Publication{Title: element.Text()}
+			soFar.Add(slug)
+		}
+	})
+
 	doc.Find("a").Each(func(index int, element *goquery.Selection) {
 		alt, exists := element.Attr("href")
 		if exists {
-			for _, u := range strings.Split(alt, "@") {
-				match, _ := regexp.MatchString("([a-zA-Z]+\\.*)+", u)
-				if match && !strings.Contains(u, "http") && !strings.Contains(u, "https") && !strings.ContainsAny(u, "?#") {
-					users = append(users, u)
-					fmt.Println(u)
+			// Get publication uri if exists
+			for _, tag := range soFar.Flatten() {
+				if strings.Contains(alt, tag.(string)) {
+					if !strings.Contains(alt, "responses") && !visited.Exists(tag) {
+						publications[tag.(string)] = Publication{Title: publications[tag.(string)].Title, Uri: alt}
+						publications[tag.(string)] = getContent(publications[tag.(string)])
+						visited.Add(tag.(string))
+					}
 				}
 			}
 		}
 	})
-	return Relevence{users: users, publicationIds: make([]string, 0)}
+
+	cleanPublications := make(map[string]Publication)
+
+	// Filter publications for empty:
+	for k, publication := range publications {
+		if publication.Uri != "" {
+			cleanPublications[k] = publication
+		}
+	}
+
+	return Relevence{Publications: cleanPublications}
+}
+
+func getContent(publication Publication) Publication {
+	content := ""
+	resp, err := http.Get(publication.Uri)
+	if err == nil {
+		doc, err := goquery.NewDocumentFromReader(resp.Body)
+		if err == nil {
+			doc.Find("p").Each(func(index int, element *goquery.Selection) {
+				content = content + element.Text() + "\n"
+			})
+		}
+	}
+	return Publication{Title: publication.Title, Uri: publication.Uri, Body: content}
+}
+
+func slugify(str string) string {
+	cleanStr := regexp.MustCompile(`[^[a-z-A-Z0-9\s]+]*`)
+	s := strings.ToLower(str)
+	s = cleanStr.ReplaceAllString(s, " ")
+	retStr := ""
+	for _, word := range strings.Split(s, " ") {
+		retStr = retStr + "-" + word
+	}
+	retStr = strings.TrimRight(retStr, "-")
+	retStr = strings.TrimLeft(retStr, "-")
+	esnureCleanStr := regexp.MustCompile(`[-]{2,}`)
+	retStr = esnureCleanStr.ReplaceAllString(retStr, "-")
+	return retStr
 }

@@ -32,3 +32,15 @@
 [[constraint]]
   name = "github.com/PuerkitoBio/goquery"
   version = "1.5.0"
+
+[[constraint]]
+  name = "github.com/Workiva/go-datastructures"
+  version = "1.0.50"
+
+[[constraint]]
+  name = "gotest.tools"
+  version = "2.3.0"
+
+[[constraint]]
+  name = "github.com/stretchr/testify"
+  version = "1.3.0"
